@@ -115,8 +115,8 @@ def removeartifacts(filtered_raw_file):
 #Creating Training, Validation and Testic Dataset folders
 subfolder_names = ['Training Data', 'Validation Data', 'Testing Data']
 for subfolder_name in subfolder_names:
-    os.makedirs(os.path.join('Data', subfolder_name, 'Healthy'))
-    os.makedirs(os.path.join('Data', subfolder_name, 'PD'))
+    os.makedirs(os.path.join('Dataset', 'Full Image', subfolder_name, 'Healthy'))
+    os.makedirs(os.path.join('Dataset', 'Full Image', subfolder_name, 'PD'))
 
 
 # In[8]:
@@ -175,7 +175,7 @@ scales = np.arange(1, 33)
 # CORRECTED: split assignment now happens once per SUBJECT, not once per epoch. Every epoch
 # belonging to a given subject is routed entirely into whichever split that subject was
 # assigned to, so no participant's data can appear in more than one of train/val/test.
-# A manifest recording which subject went where is written to disk (Data/split_manifest.csv)
+# A manifest recording which subject went where is written to disk (Dataset/split_manifest.csv)
 # as a deliverable / sanity check.
 random.seed(42)  # fixed seed so the split is reproducible and reportable
 
@@ -248,7 +248,7 @@ def create_datasets(subject_ids, subject_epoch_lists, epoch_type, cap_train=4000
         subject_ids, subject_epoch_lists
     )
 
-    write_split_manifest('Data/split_manifest.csv', 'healthy' if epoch_type == 'h' else 'pd',
+    write_split_manifest('Dataset/split_manifest.csv', 'healthy' if epoch_type == 'h' else 'pd',
                           train_ids, val_ids, test_ids)
 
     def cap_sample(epochs, cap, split_name, group_label):
@@ -299,21 +299,21 @@ def convert_to_scalogram(recieved_sample, sample_status, sample_type):
     
         if sample_status == 'h':
             if sample_type == 'training':
-                plt.savefig('Data/Training Data/Healthy/h_'+str(sample_no)+'.png', bbox_inches='tight', pad_inches=-0.1)
+                plt.savefig('Dataset/Full Image/Training Data/Healthy/h_'+str(sample_no)+'.png', bbox_inches='tight', pad_inches=-0.1)
                 sample_no+=1
                 plt.close()
                 plt.clf()
                 gc.collect()
                 
             elif sample_type == 'validation':
-                plt.savefig('Data/Validation Data/Healthy/h_'+str(sample_no)+'.png', bbox_inches='tight', pad_inches=-0.1)
+                plt.savefig('Dataset/Full Image/Validation Data/Healthy/h_'+str(sample_no)+'.png', bbox_inches='tight', pad_inches=-0.1)
                 sample_no+=1
                 plt.close()
                 plt.clf()
                 gc.collect()
             
             elif sample_type == 'testing':
-                plt.savefig('Data/Testing Data/Healthy/h_'+str(sample_no)+'.png', bbox_inches='tight', pad_inches=-0.1)
+                plt.savefig('Dataset/Full Image/Testing Data/Healthy/h_'+str(sample_no)+'.png', bbox_inches='tight', pad_inches=-0.1)
                 sample_no+=1
                 plt.close()
                 plt.clf()
@@ -321,21 +321,21 @@ def convert_to_scalogram(recieved_sample, sample_status, sample_type):
                 
         else:
             if sample_type == 'training':
-                plt.savefig('Data/Training Data/PD/p_'+str(sample_no)+'.png', bbox_inches='tight', pad_inches=-0.1)
+                plt.savefig('Dataset/Full Image/Training Data/PD/p_'+str(sample_no)+'.png', bbox_inches='tight', pad_inches=-0.1)
                 sample_no+=1
                 plt.close()
                 plt.clf()
                 gc.collect()
                 
             elif sample_type == 'validation':
-                plt.savefig('Data/Validation Data/PD/p_'+str(sample_no)+'.png', bbox_inches='tight', pad_inches=-0.1)
+                plt.savefig('Dataset/Full Image/Validation Data/PD/p_'+str(sample_no)+'.png', bbox_inches='tight', pad_inches=-0.1)
                 sample_no+=1
                 plt.close()
                 plt.clf()
                 gc.collect()
             
             elif sample_type == 'testing':
-                plt.savefig('Data/Testing Data/PD/p_'+str(sample_no)+'.png', bbox_inches='tight', pad_inches=-0.1)
+                plt.savefig('Dataset/Full Image/Testing Data/PD/p_'+str(sample_no)+'.png', bbox_inches='tight', pad_inches=-0.1)
                 sample_no+=1
                 plt.close()
                 plt.clf()
@@ -403,8 +403,8 @@ print(f"Healthy subjects: {len(healthy_subject_epochs)}, PD subjects: {len(pd_su
 # In[20]:
 
 
-if os.path.isfile('Data/split_manifest.csv'):
-    os.remove('Data/split_manifest.csv')  # start fresh each run so manifest doesn't accumulate across re-runs
+if os.path.isfile('Dataset/split_manifest.csv'):
+    os.remove('Dataset/split_manifest.csv')  # start fresh each run so manifest doesn't accumulate across re-runs
 
 get_ipython().run_cell_magic('capture', '', "create_datasets(hc_subject_ids, healthy_subject_epochs, 'h')\ncreate_datasets(pd_subject_ids, pd_subject_epochs, 'p')\n")
 
