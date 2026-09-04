@@ -79,6 +79,25 @@ val_data = np.array(val_data)
 val_labels = np.array(val_labels)
 
 
+# In[8b]: CORRECTED - load the held-out test set. This folder existed on disk but was never
+# read by this script before, so every reported metric was actually a validation metric.
+
+test_data = []
+test_labels = []
+
+for directory_path in glob.glob("Dataset/Full Image/Testing Data/*"):
+    label = directory_path.split("\\")[-1]
+    for img_path in glob.glob(os.path.join(directory_path, "*.png")):
+        img = cv2.imread(img_path, cv2.IMREAD_COLOR)
+        img = cv2.resize(img, (289, 188))
+        img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+        test_data.append(img)
+        test_labels.append(label)
+
+test_data = np.array(test_data)
+test_labels = np.array(test_labels)
+
+
 # In[9]:
 
 
@@ -99,6 +118,12 @@ le.fit(val_labels)
 val_label = le.transform(val_labels)
 
 
+# In[11b]: CORRECTED - encode test labels the same way
+
+le.fit(test_labels)
+test_label = le.transform(test_labels)
+
+
 # In[12]:
 
 
@@ -115,6 +140,11 @@ train_data = train_data.reshape(train_data.shape[0],train_data.shape[2],train_da
 
 
 val_data = val_data.reshape(val_data.shape[0],val_data.shape[2],val_data.shape[1],val_data.shape[3])
+
+
+# In[14b]: CORRECTED - reshape the test set the same way as train/val
+
+test_data = test_data.reshape(test_data.shape[0],test_data.shape[2],test_data.shape[1],test_data.shape[3])
 
 
 # In[15]:
@@ -220,6 +250,23 @@ print(train_acc)
 
 val_loss, val_acc = cnn_model.evaluate(val_data, verbose=2)
 print(val_acc)
+
+
+# In[27]: CORRECTED - evaluate ONCE on the held-out test set. Use the validation numbers above
+# only for model/hyperparameter selection during development; THIS is the number that should
+# be reported in the paper as the model's performance.
+
+test_loss, test_acc = cnn_model.evaluate(test_data, verbose=2)
+print("Held-out TEST accuracy (report this, not val_acc):", test_acc)
+
+test_predict_probs = cnn_model.predict(test_data)
+test_predict = ((test_predict_probs > 0.5) + 0).ravel()
+
+print("Held-out TEST classification report:")
+print(classification_report(test_label, test_predict))
+
+print("Held-out TEST confusion matrix:")
+print(confusion_matrix(test_label, test_predict))
 
 
 # In[ ]:
