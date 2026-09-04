@@ -38,7 +38,22 @@ Group 2's validation-data loader was pointing at `Validation Data/Group 1` inste
 `Group 2`, so `val_data2` was silently a duplicate of `val_data1` rather than genuine Group-2
 data. Fixed to point at Group 2.
 
-## 4. Worth checking with the manuscript before re-reporting
+## 4. Output folder path mismatch (found via a small end-to-end dry run)
+
+Previously: the preprocessing script wrote scalogram images to `Data/Training Data/...`,
+`Data/Validation Data/...`, `Data/Testing Data/...`, but every model script in `Models/`
+reads from `Dataset/Full Image/Training Data/...` (and the split-image script reads from
+the same `Dataset/Full Image/...` path to build its split-image variants). This meant an
+undocumented manual step - renaming/moving the output folder - was required between running
+preprocessing and running any model script. That step wasn't captured anywhere in the repo.
+
+Now: the preprocessing script writes directly to `Dataset/Full Image/...`, matching what
+every downstream script already expects. The split manifest also moved accordingly, from
+`Data/split_manifest.csv` to `Dataset/split_manifest.csv`. No manual folder move is needed
+anymore - run preprocessing, then the split-image script, then any model script, in that
+order, from the same working directory.
+
+## 5. Worth checking with the manuscript before re-reporting
 
 The `H4`/`V4` scripts use `Dropout(0.8)` in the final classifier, but Table 3 in the manuscript
 records the "best" configuration as using 0.5 dropout. Please confirm which value was actually

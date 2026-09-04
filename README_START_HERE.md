@@ -41,8 +41,12 @@ glob paths to point there).
 - Splits subjects into train/validation/test **before** pooling any epochs, so no participant's
   data can appear in more than one split (previously epochs were pooled and shuffled across
   all subjects before splitting — see CHANGES.md for detail).
-- Writes `Data/split_manifest.csv` recording which subject went to which split — please share
-  this file back, it's worth checking given only 31 subjects total.
+- Writes `Dataset/split_manifest.csv` recording which subject went to which split — please
+  share this file back, it's worth checking given only 31 subjects total.
+- Writes scalogram images directly to `Dataset/Full Image/...`, matching what every model
+  script already expects. (A dry run caught that this used to write to a differently-named
+  `Data/...` folder, requiring an undocumented manual rename step — that's now fixed, so you
+  can run the scripts back-to-back with no manual folder moving in between.)
 - Balances/caps epoch counts per split *after* subject assignment (previously this happened
   before splitting, which was part of the leakage).
 
@@ -68,7 +72,7 @@ model/hyperparameter selection, exactly as before — only the final reported nu
 ## What to send back
 
 - The four test-set results above (accuracy, precision, recall, F1 macro + weighted)
-- `Data/split_manifest.csv`
+- `Dataset/split_manifest.csv`
 - The original (leaky) validation numbers already in the manuscript — please don't discard
   them, we may want to report both as a before/after comparison
 - Anything unexpected (e.g. a split ending up with very few epochs, or accuracy swinging a
