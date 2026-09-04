@@ -32,6 +32,12 @@ hc_raw = glob("hc/*.bdf")
 #EEG of PD patient's on their medication off
 pd_raw = glob("pd/ses_off/*.bdf")
 
+# CORRECTED: subject IDs are kept aligned with hc_raw / pd_raw at every step below so that
+# splitting can be done per participant instead of per epoch. Without this, epochs from the
+# same participant can end up in more than one of train/validation/test.
+hc_subject_ids = [os.path.splitext(os.path.basename(f))[0] for f in hc_raw]
+pd_subject_ids = [os.path.splitext(os.path.basename(f))[0] for f in pd_raw]
+
 
 # In[3]:
 
@@ -124,21 +130,32 @@ def splitting_epochs(preprocessed_file):
 # In[9]:
 
 
-#reshape the spochs by flattening
-def reshape_epochs(epoch_files):
-    
+#reshape the epochs by flattening
+# CORRECTED: this used to take the whole list of per-subject epoch objects and merge every
+# subject's epochs into one flat list, which erases subject identity before the split happens.
+# It now processes ONE subject's epochs at a time and returns that subject's array separately,
+# so subject identity is preserved until after the split.
+def reshape_epochs_single_subject(epoch_obj):
+
     epochs_array = []
-    
+
+    for e in epoch_obj.get_data():
+        oneD = e.flatten()
+        reshaped = np.reshape(oneD, (-1, 1024))
+
+        for r in reshaped:
+            epochs_array.append(r)
+
+    return epochs_array
+
+def reshape_epochs(epoch_files):
+    """Kept for reference / backward compatibility - NOT used in the corrected pipeline
+    below because it discards subject identity. Use reshape_epochs_single_subject per
+    subject instead, then keep results grouped in a list-of-lists (one list per subject)."""
+    epochs_array = []
     for epoch in epoch_files:
-        
-        for e in epoch.get_data():
-            oneD = e.flatten()
-            reshape_epochs = np.reshape(oneD, (-1,1024))
-              
-            for r in reshape_epochs:
-                epochs_array.append(r)
-                
-    return epochs_array                 
+        epochs_array.extend(reshape_epochs_single_subject(epoch))
+    return epochs_array
 
 
 # In[10]:
@@ -155,57 +172,106 @@ pd_testing_data = []
 
 scales = np.arange(1, 33)
 
-def create_datasets(reshaped_epochs, epoch_type):
-    
-    global healthy_training_data
-    global healthy_validation_data
-    global healthy_testing_data
-    
-    global pd_training_data
-    global pd_validation_data
-    global pd_testing_data
-    
-    
-    epoch_count = 1
-    
-    epoch_size = int(len(reshaped_epochs))
-    
-    training_size = int(epoch_size*80/100)
-    test_val_size = int(epoch_size*10/100)    
-    validation_size = training_size + test_val_size
-    
-    
-    if epoch_type == 'h': 
-        
-        for epoch in reshaped_epochs:
-            
-            if epoch_count <= training_size:
-                healthy_training_data.append(epoch)
-                epoch_count += 1
-                
-            elif epoch_count <= validation_size:
-                healthy_validation_data.append(epoch)
-                epoch_count += 1
-                
-            else:
-                healthy_testing_data.append(epoch)
-                epoch_count += 1
-                
+# CORRECTED: split assignment now happens once per SUBJECT, not once per epoch. Every epoch
+# belonging to a given subject is routed entirely into whichever split that subject was
+# assigned to, so no participant's data can appear in more than one of train/val/test.
+# A manifest recording which subject went where is written to disk (Data/split_manifest.csv)
+# as a deliverable / sanity check.
+random.seed(42)  # fixed seed so the split is reproducible and reportable
+
+def subject_level_split(subject_ids, subject_epoch_lists, val_frac=0.1, test_frac=0.1):
+    """
+    subject_ids: list of subject identifiers (e.g. filenames), one per subject
+    subject_epoch_lists: list of lists of epoch arrays, same order/length as subject_ids
+    Returns: (train_epochs, val_epochs, test_epochs, train_ids, val_ids, test_ids)
+    """
+    n_subjects = len(subject_ids)
+    order = list(range(n_subjects))
+    random.shuffle(order)
+
+    n_test = max(1, round(n_subjects * test_frac))
+    n_val = max(1, round(n_subjects * val_frac))
+    n_train = n_subjects - n_val - n_test
+    if n_train < 1:
+        raise ValueError(
+            f"Not enough subjects ({n_subjects}) to form a non-empty train split with "
+            f"val_frac={val_frac}, test_frac={test_frac}. Consider subject-level k-fold "
+            f"instead of a single fixed split for such a small cohort."
+        )
+
+    train_idx = order[:n_train]
+    val_idx = order[n_train:n_train + n_val]
+    test_idx = order[n_train + n_val:]
+
+    train_epochs, val_epochs, test_epochs = [], [], []
+    for i in train_idx:
+        train_epochs.extend(subject_epoch_lists[i])
+    for i in val_idx:
+        val_epochs.extend(subject_epoch_lists[i])
+    for i in test_idx:
+        test_epochs.extend(subject_epoch_lists[i])
+
+    train_ids = [subject_ids[i] for i in train_idx]
+    val_ids = [subject_ids[i] for i in val_idx]
+    test_ids = [subject_ids[i] for i in test_idx]
+
+    return train_epochs, val_epochs, test_epochs, train_ids, val_ids, test_ids
+
+
+def write_split_manifest(path, group_label, train_ids, val_ids, test_ids):
+    """Appends split assignment rows to a manifest CSV so it's auditable/reportable."""
+    file_exists = os.path.isfile(path)
+    with open(path, 'a') as f:
+        if not file_exists:
+            f.write("group,subject_id,split\n")
+        for sid in train_ids:
+            f.write(f"{group_label},{sid},train\n")
+        for sid in val_ids:
+            f.write(f"{group_label},{sid},validation\n")
+        for sid in test_ids:
+            f.write(f"{group_label},{sid},test\n")
+
+
+def create_datasets(subject_ids, subject_epoch_lists, epoch_type, cap_train=4000, cap_val=500, cap_test=500):
+    """
+    epoch_type: 'h' for healthy, anything else for PD.
+    subject_ids / subject_epoch_lists: aligned per-subject data (see subject_level_split).
+    cap_* : maximum epochs to keep per split, sampled AFTER the subject-level split so that
+    class balance is preserved without ever mixing subjects across splits. If a split has
+    fewer epochs than the cap, all available epochs are kept (and this is reported, since
+    it affects how much data is actually available downstream).
+    """
+    global healthy_training_data, healthy_validation_data, healthy_testing_data
+    global pd_training_data, pd_validation_data, pd_testing_data
+
+    train_epochs, val_epochs, test_epochs, train_ids, val_ids, test_ids = subject_level_split(
+        subject_ids, subject_epoch_lists
+    )
+
+    write_split_manifest('Data/split_manifest.csv', 'healthy' if epoch_type == 'h' else 'pd',
+                          train_ids, val_ids, test_ids)
+
+    def cap_sample(epochs, cap, split_name, group_label):
+        if len(epochs) > cap:
+            return random.sample(epochs, cap)
+        else:
+            print(f"[warning] {group_label} {split_name} split has only {len(epochs)} epochs "
+                  f"available (requested cap {cap}) - using all of them.")
+            return epochs
+
+    group_label = 'healthy' if epoch_type == 'h' else 'pd'
+    train_epochs = cap_sample(train_epochs, cap_train, 'train', group_label)
+    val_epochs = cap_sample(val_epochs, cap_val, 'validation', group_label)
+    test_epochs = cap_sample(test_epochs, cap_test, 'test', group_label)
+
+    if epoch_type == 'h':
+        healthy_training_data.extend(train_epochs)
+        healthy_validation_data.extend(val_epochs)
+        healthy_testing_data.extend(test_epochs)
     else:
-        
-        for epoch in reshaped_epochs:
-        
-            if epoch_count <= training_size:
-                pd_training_data.append(epoch)
-                epoch_count += 1
-                
-            elif epoch_count <= validation_size:
-                pd_validation_data.append(epoch)
-                epoch_count += 1
-                
-            else:
-                pd_testing_data.append(epoch)
-                epoch_count += 1
+        pd_training_data.extend(train_epochs)
+        pd_validation_data.extend(val_epochs)
+        pd_testing_data.extend(test_epochs)
 
 
 # In[11]:
@@ -310,27 +376,37 @@ get_ipython().run_cell_magic('capture', '', 'pd_epoch_files = [splitting_epochs(
 # In[17]:
 
 
-get_ipython().run_cell_magic('capture', '', 'healthy_reshape_epochs = reshape_epochs(healthy_epoch_files) \npd_reshape_epochs = reshape_epochs(pd_epoch_files) \n')
+# CORRECTED: reshape each subject's epochs SEPARATELY (list of lists, one entry per subject)
+# instead of merging all subjects into one flat list. hc_subject_ids / pd_subject_ids (defined
+# near the top of this script) stay aligned index-for-index with these per-subject lists.
+get_ipython().run_cell_magic('capture', '', 'healthy_subject_epochs = [reshape_epochs_single_subject(e) for e in healthy_epoch_files]\npd_subject_epochs = [reshape_epochs_single_subject(e) for e in pd_epoch_files]\n')
 
 
 # In[18]:
 
 
-random.shuffle(healthy_reshape_epochs)
-random.shuffle(pd_reshape_epochs)
+# CORRECTED: no global shuffle/sample across subjects here anymore - shuffling now happens
+# at the SUBJECT level inside subject_level_split(), and epoch-level sampling happens only
+# after subjects have already been routed to train/val/test (inside create_datasets()).
+# This cell is intentionally now a no-op check rather than a leakage point.
+print(f"Healthy subjects: {len(healthy_subject_epochs)}, PD subjects: {len(pd_subject_epochs)}")
 
 
 # In[19]:
 
 
-selected_healthy_epochs = random.sample(healthy_reshape_epochs,5000)
-selected_pd_epochs = random.sample(pd_reshape_epochs,5000)
+# (Removed: this used to draw a random 5000-epoch sample from the pooled, subject-agnostic
+# list before splitting. Capping/balancing now happens per-split, after subject assignment -
+# see cap_train/cap_val/cap_test in create_datasets().)
 
 
 # In[20]:
 
 
-get_ipython().run_cell_magic('capture', '', "create_datasets(selected_healthy_epochs, 'h')\ncreate_datasets(selected_pd_epochs, 'p')\n")
+if os.path.isfile('Data/split_manifest.csv'):
+    os.remove('Data/split_manifest.csv')  # start fresh each run so manifest doesn't accumulate across re-runs
+
+get_ipython().run_cell_magic('capture', '', "create_datasets(hc_subject_ids, healthy_subject_epochs, 'h')\ncreate_datasets(pd_subject_ids, pd_subject_epochs, 'p')\n")
 
 
 # In[22]:
